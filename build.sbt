@@ -17,13 +17,26 @@ lazy val commonSettings = Seq(
 
 lazy val method = (project in file("."))
   .aggregate(
+    methodCore.jvm,
+    methodCore.js,
+    methodError.jvm,
+    methodError.js,
   )
   .settings(commonSettings)
   .settings(
     name := "method",
   )
 
+lazy val methodCore = (crossProject(JSPlatform, JVMPlatform) in file("method-core"))
+  .settings(commonSettings)
+  .settings(
+    name := "method-core",
+    libraryDependencies ++= Seq(
+    ),
+  )
+
 lazy val methodError = (crossProject(JSPlatform, JVMPlatform) in file("method-error"))
+  .dependsOn(methodCore)
   .settings(commonSettings)
   .settings(
     name := "method-error",
