@@ -32,6 +32,7 @@ lazy val methodCore = (crossProject(JSPlatform, JVMPlatform) in file("method-cor
   .settings(
     name := "method-core",
     libraryDependencies ++= Seq(
+      "org.typelevel" %%% "spire" % spireVersion,
     ),
   )
 
@@ -46,6 +47,7 @@ lazy val methodError = (crossProject(JSPlatform, JVMPlatform) in file("method-er
     ),
   )
 
+val spireVersion = "0.18.0"
 val catsEffectVersion = "3.5.7"
 val pekVersion = "0.1.0-SNAPSHOT"
 val pekErrorVersion = pekVersion
