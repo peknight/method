@@ -15,3 +15,4 @@ trait EitherFSyntax:
       _retry(fe)(f)
   end extension
 end EitherFSyntax
+object EitherFSyntax extends EitherFSyntax
