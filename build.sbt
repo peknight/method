@@ -32,6 +32,7 @@ lazy val methodCore = (crossProject(JSPlatform, JVMPlatform) in file("method-cor
   .settings(
     name := "method-core",
     libraryDependencies ++= Seq(
+      "org.typelevel" %%% "cats-effect" % catsEffectVersion,
       "org.typelevel" %%% "spire" % spireVersion,
     ),
   )
@@ -43,11 +44,10 @@ lazy val methodError = (crossProject(JSPlatform, JVMPlatform) in file("method-er
     name := "method-error",
     libraryDependencies ++= Seq(
       "com.peknight" %%% "error-core" % pekErrorVersion,
-      "org.typelevel" %%% "cats-effect" % catsEffectVersion,
     ),
   )
 
-val spireVersion = "0.18.0"
 val catsEffectVersion = "3.5.7"
+val spireVersion = "0.18.0"
 val pekVersion = "0.1.0-SNAPSHOT"
 val pekErrorVersion = pekVersion
