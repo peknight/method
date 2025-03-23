@@ -30,7 +30,7 @@ object Retry:
   case object Now extends Retry
   case class After(time: Duration) extends Retry
 
-  def state[F[_]: Async, A, B, S](fe: F[Either[A, B]])(f: (Either[Error, B], RetryState) => StateT[F, S, Retry])
+  def stateT[F[_]: Async, A, B, S](fe: F[Either[A, B]])(f: (Either[Error, B], RetryState) => StateT[F, S, Retry])
   : StateT[F, S, Either[Error, B]] =
     val run: StateT[F, S, Either[Error, B]] = StateT.liftF(fe.asError.map(_.flatMap(_.asError)))
     val monotonic: StateT[F, S, FiniteDuration] = StateT.liftF(Clock[F].monotonic)
@@ -57,8 +57,12 @@ object Retry:
       case Right((s, either)) => (s, either)
     })
 
+  def state[F[_]: Async, A, B, S](fe: F[Either[A, B]])(s: S)(f: (Either[Error, B], RetryState) => StateT[F, S, Retry])
+  : F[Either[Error, B]] =
+    stateT[F, A, B, S](fe)(f).runA(s)
+
   def stateless[F[_]: Async, A, B](fe: F[Either[A, B]])(f: (Either[Error, B], RetryState) => F[Retry]): F[Either[Error, B]] =
-    state[F, A, B, Unit](fe)((either, state) => StateT.liftF(f(either, state))).runA(())
+    stateT[F, A, B, Unit](fe)((either, state) => StateT.liftF(f(either, state))).runA(())
 
   def random[F[_]: {Async, RandomProvider}, A, B](fe: F[Either[A, B]])
                                                  (f: (Either[Error, B], RetryState) => StateT[F, Random[F], Retry])
@@ -66,7 +70,7 @@ object Retry:
     val eitherT =
       for
         random <- EitherT(RandomProvider[F].random.asError)
-        result <- EitherT(state[F, A, B, Random[F]](fe)(f).runA(random))
+        result <- EitherT(stateT[F, A, B, Random[F]](fe)(f).runA(random))
       yield
         result
     eitherT.value

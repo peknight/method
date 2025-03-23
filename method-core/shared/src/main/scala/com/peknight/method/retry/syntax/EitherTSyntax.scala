@@ -12,9 +12,12 @@ import scala.concurrent.duration.*
 
 trait EitherTSyntax:
   extension [F[_], A, B] (eitherT: EitherT[F, A, B])
-    def state[S](f: (Either[Error, B], RetryState) => StateT[F, S, Retry])(using Async[F])
+    def stateT[S](f: (Either[Error, B], RetryState) => StateT[F, S, Retry])(using Async[F])
     : StateT[F, S, Either[Error, B]] =
-      Retry.state(eitherT.value)(f)
+      Retry.stateT(eitherT.value)(f)
+    def state[S](s: S)(f: (Either[Error, B], RetryState) => StateT[F, S, Retry])(using Async[F])
+    : EitherT[F, Error, B] =
+      EitherT(Retry.state(eitherT.value)(s)(f))
     def stateless(f: (Either[Error, B], RetryState) => F[Retry])(using Async[F]): EitherT[F, Error, B] =
       EitherT(Retry.stateless(eitherT.value)(f))
     def random(f: (Either[Error, B], RetryState) => StateT[F, Random[F], Retry])(using Async[F], RandomProvider[F])
