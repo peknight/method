@@ -1,6 +1,5 @@
 package com.peknight.method.retry
 
-import cats.Monad
 import cats.data.{EitherT, StateT}
 import cats.effect.{Async, Clock, GenTemporal}
 import cats.syntax.either.*
@@ -8,6 +7,7 @@ import cats.syntax.eq.*
 import cats.syntax.flatMap.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
+import cats.{Functor, Monad}
 import com.peknight.error.Error
 import com.peknight.error.syntax.applicativeError.asError
 import com.peknight.error.syntax.either.asError
@@ -97,6 +97,28 @@ object Retry:
   : F[Either[Error, B]] =
     stateless[F, A, B](fe)(fixedOffset(maxAttempts, timeout, interval, offset, exponentialBackoff)(success)(effect))
 
+  def handleInterval[F[_]: Functor, S](state: RetryState, timeout: Option[FiniteDuration] = None,
+                                       interval: Option[FiniteDuration] = Some(1.second),
+                                       exponentialBackoff: Boolean = false)
+                                      (offsetS: StateT[F, S, Option[FiniteDuration]])
+  : StateT[F, S, Retry] =
+    val base = if exponentialBackoff then interval.map(_ * (2 ** (state.attempts - 1))) else interval
+    offsetS.map { offset =>
+      val sleep = (base, offset) match
+        case (Some(base), Some(offset)) => base + offset
+        case (Some(base), _) => base
+        case (_, Some(offset)) => offset
+        case _ => 0.nano
+      val sleepTime = if sleep > 0.nano then sleep else 0.nano
+      timeout match
+        case Some(timeout) =>
+          val overflow = (state.now + sleepTime) - (state.start + timeout)
+          if overflow > 0.nano then Timeout(sleepTime, overflow)
+          else if sleepTime > 0.nano then After(sleepTime)
+          else Now
+        case _ => if sleepTime > 0.nano then After(sleepTime) else Now
+    }
+
   private def handleState[F[_]: Monad, A, S](maxAttempts: Option[Int] = Some(3),
                                              timeout: Option[FiniteDuration] = None,
                                              interval: Option[FiniteDuration] = Some(1.second),
@@ -109,23 +131,7 @@ object Retry:
       val stateT =
         if success(value) then StateT.pure(Success)
         else if maxAttempts.exists(_ <= state.attempts) then StateT.pure(MaxAttempts(state.attempts))
-        else
-          val base = if exponentialBackoff then interval.map(_ * (2 ** (state.attempts - 1))) else interval
-          offsetS.map { offset =>
-            val sleep = (base, offset) match
-              case (Some(base), Some(offset)) => base + offset
-              case (Some(base), _) => base
-              case (_, Some(offset)) => offset
-              case _ => 0.nano
-            val sleepTime = if sleep > 0.nano then sleep else 0.nano
-            timeout match
-              case Some(timeout) =>
-                val overflow = (state.now + sleepTime) - (state.start + timeout)
-                if overflow > 0.nano then Timeout(sleepTime, overflow)
-                else if sleepTime > 0.nano then After(sleepTime)
-                else Now
-              case _ => if sleepTime > 0.nano then After(sleepTime) else Now
-          }
+        else handleInterval[F, S](state, timeout, interval, exponentialBackoff)(offsetS)
       stateT.flatMap(retry => StateT.liftF(effect(value, state, retry)).as(retry))
 
   private def randomOffset[F[_]: Monad, A](maxAttempts: Option[Int] = Some(3),
@@ -139,11 +145,7 @@ object Retry:
     handleState(maxAttempts, timeout, interval, exponentialBackoff)(success)(effect) {
       val (minOffset, maxOffset) = offsetInterval(offset)
       if minOffset < maxOffset then
-        for
-          random <- StateT.get[F, Random[F]]
-          offset <- between[F](minOffset.toNanos, (maxOffset + 1.nano).toNanos).map(_.nanos)
-        yield
-          offset.some
+        between[F](minOffset.toNanos, (maxOffset + 1.nano).toNanos).map(_.nanos.some)
       else if minOffset === maxOffset then StateT.pure(minOffset.some)
       else StateT.pure(none[FiniteDuration])
     }
