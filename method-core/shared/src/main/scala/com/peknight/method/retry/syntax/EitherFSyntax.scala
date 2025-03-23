@@ -15,18 +15,29 @@ trait EitherFSyntax:
     def state[S](f: (Either[Error, B], RetryState) => StateT[F, S, Retry])(using Async[F])
     : StateT[F, S, Either[Error, B]] =
       Retry.state(fe)(f)
-    def retry(f: (Either[Error, B], RetryState) => F[Retry])(using Async[F]): F[Either[Error, B]] =
-      Retry.retry(fe)(f)
+    def stateless(f: (Either[Error, B], RetryState) => F[Retry])(using Async[F]): F[Either[Error, B]] =
+      Retry.stateless(fe)(f)
     def random(f: (Either[Error, B], RetryState) => StateT[F, Random[F], Retry])(using Async[F], RandomProvider[F])
     : F[Either[Error, B]] =
       Retry.random(fe)(f)
-    def retryRandom(maxAttempts: Option[Int] = Some(3), interval: Option[FiniteDuration] = Some(1.second),
-                    offset: Option[Interval[FiniteDuration]] = None, timeout: Option[FiniteDuration] = None,
+    def retryRandom(maxAttempts: Option[Int] = Some(3),
+                    timeout: Option[FiniteDuration] = None,
+                    interval: Option[FiniteDuration] = Some(1.second),
+                    offset: Option[Interval[FiniteDuration]] = None,
                     exponentialBackoff: Boolean = false)
                    (success: Either[Error, B] => Boolean)
                    (effect: (Either[Error, B], RetryState, Retry) => F[Unit])
                    (using Async[F], RandomProvider[F]): F[Either[Error, B]] =
-      Retry.retryRandom(fe)(maxAttempts, interval, offset, timeout, exponentialBackoff)(success)(effect)
+      Retry.retryRandom(fe)(maxAttempts, timeout, interval, offset, exponentialBackoff)(success)(effect)
+    def retry(maxAttempts: Option[Int] = Some(3),
+              timeout: Option[FiniteDuration] = None,
+              interval: Option[FiniteDuration] = Some(1.second),
+              offset: Option[FiniteDuration] = None,
+              exponentialBackoff: Boolean = false)
+             (success: Either[Error, B] => Boolean)
+             (effect: (Either[Error, B], RetryState, Retry) => F[Unit])
+             (using Async[F], RandomProvider[F]): F[Either[Error, B]] =
+      Retry.retry(fe)(maxAttempts, timeout, interval, offset, exponentialBackoff)(success)(effect)
   end extension
 end EitherFSyntax
 object EitherFSyntax extends EitherFSyntax
