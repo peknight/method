@@ -36,7 +36,7 @@ trait EitherFSyntax:
               exponentialBackoff: Boolean = false)
              (success: Either[Error, B] => Boolean)
              (effect: (Either[Error, B], RetryState, Retry) => F[Unit])
-             (using Async[F], RandomProvider[F]): F[Either[Error, B]] =
+             (using Async[F]): F[Either[Error, B]] =
       Retry.retry(fe)(maxAttempts, timeout, interval, offset, exponentialBackoff)(success)(effect)
   end extension
 end EitherFSyntax
