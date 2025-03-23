@@ -1,6 +1,5 @@
 package com.peknight.method.retry
 
-import cats.Monad
 import cats.data.{EitherT, StateT}
 import cats.effect.{Async, Clock, GenTemporal, Sync}
 import cats.syntax.either.*
@@ -8,6 +7,7 @@ import cats.syntax.eq.*
 import cats.syntax.flatMap.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
+import cats.{Applicative, Monad}
 import com.peknight.error.Error
 import com.peknight.error.syntax.applicativeError.asError
 import com.peknight.error.syntax.either.asError
@@ -23,11 +23,16 @@ import scala.concurrent.duration.*
 
 sealed trait Retry derives CanEqual
 object Retry:
-  case object Stop extends Retry
+  sealed trait Stop extends Retry
+  case object Success extends Stop
+  case class MaxAttempts(attempts: Int) extends Stop
+  case class Timeout(sleep: FiniteDuration, overflow: FiniteDuration) extends Stop
   case object Now extends Retry
   case class After(time: Duration) extends Retry
 
-  def stop: Retry = Stop
+  def success: Retry = Success
+  def maxAttempts(attempts: Int): Retry = MaxAttempts(attempts)
+  def timeout(sleep: FiniteDuration, overflow: FiniteDuration): Retry = Timeout(sleep, overflow)
   def now: Retry = Now
   def after(time: Duration): Retry = After(time)
 
@@ -48,7 +53,7 @@ object Retry:
               case _ => StateT.pure[F, S, Unit](())
           yield
             retry match
-              case Retry.Stop => either.asRight
+              case _: Retry.Stop => either.asRight
               case _ => (attempts + 1).asLeft
         }
       yield
@@ -58,7 +63,7 @@ object Retry:
       case Right((s, either)) => (s, either)
     })
 
-  def apply[F[_]: Async, A, B](fe: F[Either[A, B]])(f: (Either[Error, B], RetryState) => F[Retry]): F[Either[Error, B]] =
+  def retry[F[_]: Async, A, B](fe: F[Either[A, B]])(f: (Either[Error, B], RetryState) => F[Retry]): F[Either[Error, B]] =
     state[F, A, B, Unit](fe)((either, state) => StateT.liftF(f(either, state))).runA(())
 
   def random[F[_]: {Async, RandomProvider}, A, B](fe: F[Either[A, B]])
@@ -72,17 +77,18 @@ object Retry:
         result
     eitherT.value
 
-  def retryRandom[F[_]: {Async, RandomProvider}, A, B](fe: F[Either[A, B]])
-                                                      (maxAttempts: Option[Int] = Some(3),
-                                                       interval: Option[FiniteDuration] = Some(1.second),
-                                                       offset: Option[Interval[FiniteDuration]] = None,
-                                                       timeout: Option[FiniteDuration] = None,
-                                                       exponentialBackoff: Boolean = false)
-                                                      (success: Either[Error, B] => Boolean): F[Either[Error, B]] =
-    random(fe) {
-      case (either, state) =>
-        if success(either) then StateT.pure(stop)
-        else if maxAttempts.exists(_ <= state.attempts) then StateT.pure(stop)
+  private def randomState[F[_]: Monad, A](maxAttempts: Option[Int] = Some(3),
+                                          interval: Option[FiniteDuration] = Some(1.second),
+                                          offset: Option[Interval[FiniteDuration]] = None,
+                                          timeout: Option[FiniteDuration] = None,
+                                          exponentialBackoff: Boolean = false)
+                                         (success: A => Boolean)
+                                         (effect: (A, RetryState, Retry) => F[Unit])
+  : (A, RetryState) => StateT[F, Random[F], Retry] =
+    (value, state) =>
+      val stateT =
+        if success(value) then StateT.pure(Success)
+        else if maxAttempts.exists(_ <= state.attempts) then StateT.pure(MaxAttempts(state.attempts))
         else
           val base = if exponentialBackoff then interval.map(_ * (2 ** (state.attempts - 1))) else interval
           val (minOffset, maxOffset) = offsetInterval(offset)
@@ -98,20 +104,35 @@ object Retry:
               else StateT.pure(base)
           yield
             timeout match
-              case Some(timeout) if state.now + sleep.filter(_ >= 0.second).getOrElse(0.second) - state.start > timeout =>
-                stop
-              case _ => sleep.filter(_ > 0.second).fold(now)(after)
-    }
+              case Some(timeout) =>
+                val sleepTime = sleep.filter(_ >= 0.nano).getOrElse(0.nano)
+                val overflow = (state.now + sleepTime) - (state.start + timeout)
+                if overflow > 0.nano then Timeout(sleepTime, overflow)
+                else if sleepTime > 0.nano then after(sleepTime)
+                else now
+              case _ => sleep.filter(_ > 0.nano).fold(now)(after)
+      stateT.flatMap(retry => StateT.liftF(effect(value, state, retry)).as(retry))
+
+  def retryRandom[F[_]: {Async, RandomProvider}, A, B](fe: F[Either[A, B]])
+                                                      (maxAttempts: Option[Int] = Some(3),
+                                                       interval: Option[FiniteDuration] = Some(1.second),
+                                                       offset: Option[Interval[FiniteDuration]] = None,
+                                                       timeout: Option[FiniteDuration] = None,
+                                                       exponentialBackoff: Boolean = false)
+                                                      (success: Either[Error, B] => Boolean)
+                                                      (effect: (Either[Error, B], RetryState, Retry) => F[Unit])
+  : F[Either[Error, B]] =
+    random(fe)(randomState(maxAttempts, interval, offset, timeout, exponentialBackoff)(success)(effect))
 
   private def offsetInterval(offset: Option[Interval[FiniteDuration]]): (FiniteDuration, FiniteDuration) =
     offset match
       case Some(interval) =>
         val (l, u) = (interval.lowerBound, interval.upperBound) match
           case (lower: ValueBound[FiniteDuration], upper: ValueBound[FiniteDuration]) => (lower.lower, upper.upper)
-          case (lower: ValueBound[FiniteDuration], _) => (lower.lower, lower.lower max 0.second)
-          case (_, upper: ValueBound[FiniteDuration]) => (upper.upper min 0.second, upper.upper)
-          case _ => (0.second, 0.second)
-        if l <= u then (l, u) else (0.second, 0.second)
-      case _ => (0.second, 0.second)
+          case (lower: ValueBound[FiniteDuration], _) => (lower.lower, lower.lower max 0.nano)
+          case (_, upper: ValueBound[FiniteDuration]) => (upper.upper min 0.nano, upper.upper)
+          case _ => (0.nano, 0.nano)
+        if l <= u then (l, u) else (0.nano, 0.nano)
+      case _ => (0.nano, 0.nano)
 
 end Retry

@@ -16,7 +16,7 @@ trait EitherTSyntax:
     : StateT[F, S, Either[Error, B]] =
       Retry.state(eitherT.value)(f)
     def retry(f: (Either[Error, B], RetryState) => F[Retry])(using Async[F]): EitherT[F, Error, B] =
-      EitherT(Retry(eitherT.value)(f))
+      EitherT(Retry.retry(eitherT.value)(f))
     def random(f: (Either[Error, B], RetryState) => StateT[F, Random[F], Retry])(using Async[F], RandomProvider[F])
     : EitherT[F, Error, B] =
       EitherT(Retry.random(eitherT.value)(f))
@@ -24,8 +24,11 @@ trait EitherTSyntax:
                     offset: Option[Interval[FiniteDuration]] = None, timeout: Option[FiniteDuration] = None,
                     exponentialBackoff: Boolean = false)
                    (success: Either[Error, B] => Boolean)
+                   (effect: (Either[Error, B], RetryState, Retry) => F[Unit])
                    (using Async[F], RandomProvider[F]): EitherT[F, Error, B] =
-      EitherT(Retry.retryRandom(eitherT.value)(maxAttempts, interval, offset, timeout, exponentialBackoff)(success))
+      EitherT(
+        Retry.retryRandom(eitherT.value)(maxAttempts, interval, offset, timeout, exponentialBackoff)(success)(effect)
+      )
   end extension
 end EitherTSyntax
 object EitherTSyntax extends EitherTSyntax
