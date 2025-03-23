@@ -19,8 +19,6 @@ lazy val method = (project in file("."))
   .aggregate(
     methodCore.jvm,
     methodCore.js,
-    methodError.jvm,
-    methodError.js,
   )
   .settings(commonSettings)
   .settings(
@@ -32,22 +30,13 @@ lazy val methodCore = (crossProject(JSPlatform, JVMPlatform) in file("method-cor
   .settings(
     name := "method-core",
     libraryDependencies ++= Seq(
-      "org.typelevel" %%% "cats-effect" % catsEffectVersion,
-      "org.typelevel" %%% "spire" % spireVersion,
-    ),
-  )
-
-lazy val methodError = (crossProject(JSPlatform, JVMPlatform) in file("method-error"))
-  .dependsOn(methodCore)
-  .settings(commonSettings)
-  .settings(
-    name := "method-error",
-    libraryDependencies ++= Seq(
       "com.peknight" %%% "error-core" % pekErrorVersion,
+      "com.peknight" %%% "random-core" % pekRandomVersion,
+      "com.peknight" %%% "spire-ext" % pekExtVersion,
     ),
   )
 
-val catsEffectVersion = "3.5.7"
-val spireVersion = "0.18.0"
 val pekVersion = "0.1.0-SNAPSHOT"
+val pekRandomVersion = pekVersion
 val pekErrorVersion = pekVersion
+val pekExtVersion = pekVersion
