@@ -1,4 +1,4 @@
-package com.peknight.method.retry.syntax
+package com.peknight.method.syntax
 
 import cats.data.{EitherT, StateT}
 import cats.effect.Async
@@ -12,15 +12,15 @@ import scala.concurrent.duration.*
 
 trait EitherTSyntax:
   extension [F[_], A, B] (eitherT: EitherT[F, A, B])
-    def stateT[S](f: (Either[Error, B], RetryState) => StateT[F, S, Retry])(using Async[F])
+    def retryStateT[S](f: (Either[Error, B], RetryState) => StateT[F, S, Retry])(using Async[F])
     : StateT[F, S, Either[Error, B]] =
       Retry.stateT(eitherT.value)(f)
-    def state[S](s: S)(f: (Either[Error, B], RetryState) => StateT[F, S, Retry])(using Async[F])
+    def retryState[S](s: S)(f: (Either[Error, B], RetryState) => StateT[F, S, Retry])(using Async[F])
     : EitherT[F, Error, B] =
       EitherT(Retry.state(eitherT.value)(s)(f))
-    def stateless(f: (Either[Error, B], RetryState) => F[Retry])(using Async[F]): EitherT[F, Error, B] =
+    def retryStateless(f: (Either[Error, B], RetryState) => F[Retry])(using Async[F]): EitherT[F, Error, B] =
       EitherT(Retry.stateless(eitherT.value)(f))
-    def random(f: (Either[Error, B], RetryState) => StateT[F, Random[F], Retry])(using Async[F], RandomProvider[F])
+    def retryRandomState(f: (Either[Error, B], RetryState) => StateT[F, Random[F], Retry])(using Async[F], RandomProvider[F])
     : EitherT[F, Error, B] =
       EitherT(Retry.random(eitherT.value)(f))
     def retryRandom(maxAttempts: Option[Int] = Some(3),
