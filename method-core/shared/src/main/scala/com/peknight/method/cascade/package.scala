@@ -30,7 +30,7 @@ package object cascade:
           case Right(None) => (tail, head.write :: hydrates, none[A].asRight[Error].some).asLeft.pure[F]
           case Right(Some(value)) =>
             hydrates.traverse(hydrate => EitherT(hydrate(value).asError.map(_.flatMap(_.asError))))
-              .value.as(value.some.asRight[Error].asRight)
+              .value.map(_.as(value.some).asRight)
       }
       case (_, _, temp) => temp.getOrElse(none[A].asRight[Error]).asRight.pure[F]
     }
