@@ -13,11 +13,11 @@ import com.peknight.error.syntax.applicativeError.asError
 import com.peknight.error.syntax.either.asError
 
 package object cascade:
-  def fetch[F[_], E, A](sources: List[Source[F, E, A]])(using MonadError[F, Throwable]): F[Either[Error, Option[A]]] =
+  def fetch[F[_], E, A](sources: Source[F, E, A]*)(using MonadError[F, Throwable]): F[Either[Error, Option[A]]] =
     Monad[F].tailRecM[
       (List[Source[F, E, A]], List[A => F[Either[E, Unit]]], Option[Either[Error, Option[A]]]),
       Either[Error, Option[A]]
-    ]((sources, Nil, None)) {
+    ]((sources.toList, Nil, None)) {
       case (head :: tail, hydrates, temp) => head.read.asError.flatMap {
         _.flatMap(_.asError) match
           case Left(error) =>
