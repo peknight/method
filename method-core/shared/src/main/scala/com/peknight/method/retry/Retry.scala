@@ -7,7 +7,7 @@ import cats.syntax.eq.*
 import cats.syntax.flatMap.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
-import cats.{Functor, Monad}
+import cats.{Functor, Monad, Show}
 import com.peknight.error.Error
 import com.peknight.error.syntax.applicativeError.asError
 import com.peknight.error.syntax.either.asError
@@ -30,14 +30,14 @@ object Retry:
   case object Now extends Retry
   case class After(time: Duration) extends Retry
 
-  def stateT[F[_]: Async, A, B, S](fe: F[Either[A, B]])(f: (Either[Error, B], RetryState) => StateT[F, S, Retry])
-  : StateT[F, S, Either[Error, B]] =
-    val run: StateT[F, S, Either[Error, B]] = StateT.liftF(fe.asError.map(_.flatMap(_.asError)))
+  def stateT[F[_]: Async, S, A](fe: F[Either[Error, A]])(f: (Either[Error, A], RetryState) => StateT[F, S, Retry])
+  : StateT[F, S, Either[Error, A]] =
+    val run: StateT[F, S, Either[Error, A]] = StateT.liftF(fe)
     val monotonic: StateT[F, S, FiniteDuration] = StateT.liftF(Clock[F].monotonic)
     val state =
       for
         startTime <- monotonic
-        either <- Monad[[X] =>> StateT[F, S, X]].tailRecM[Int, Either[Error, B]](1) { attempts =>
+        either <- Monad[[X] =>> StateT[F, S, X]].tailRecM[Int, Either[Error, A]](1) { attempts =>
           for
             either <- run
             now <- monotonic
@@ -52,50 +52,50 @@ object Retry:
         }
       yield
         either
-    StateT[F, S, Either[Error, B]](s => state.run(s).asError.map {
-      case Left(error) => (s, error.asLeft[B])
+    StateT[F, S, Either[Error, A]](s => state.run(s).asError.map {
+      case Left(error) => (s, error.asLeft[A])
       case Right((s, either)) => (s, either)
     })
 
-  def state[F[_]: Async, A, B, S](fe: F[Either[A, B]])(s: S)(f: (Either[Error, B], RetryState) => StateT[F, S, Retry])
-  : F[Either[Error, B]] =
-    stateT[F, A, B, S](fe)(f).runA(s)
+  def state[F[_]: Async, S, A](fe: F[Either[Error, A]])(s: S)(f: (Either[Error, A], RetryState) => StateT[F, S, Retry])
+  : F[Either[Error, A]] =
+    stateT[F, S, A](fe)(f).runA(s)
 
-  def stateless[F[_]: Async, A, B](fe: F[Either[A, B]])(f: (Either[Error, B], RetryState) => F[Retry]): F[Either[Error, B]] =
-    stateT[F, A, B, Unit](fe)((either, state) => StateT.liftF(f(either, state))).runA(())
+  def stateless[F[_]: Async, A](fe: F[Either[Error, A]])(f: (Either[Error, A], RetryState) => F[Retry]): F[Either[Error, A]] =
+    stateT[F, Unit, A](fe)((either, state) => StateT.liftF(f(either, state))).runA(())
 
-  def random[F[_]: {Async, RandomProvider}, A, B](fe: F[Either[A, B]])
-                                                 (f: (Either[Error, B], RetryState) => StateT[F, Random[F], Retry])
-  : F[Either[Error, B]] =
+  def random[F[_]: {Async, RandomProvider}, A](fe: F[Either[Error, A]])
+                                              (f: (Either[Error, A], RetryState) => StateT[F, Random[F], Retry])
+  : F[Either[Error, A]] =
     val eitherT =
       for
         random <- EitherT(RandomProvider[F].random.asError)
-        result <- EitherT(stateT[F, A, B, Random[F]](fe)(f).runA(random))
+        result <- EitherT(stateT[F, Random[F], A](fe)(f).runA(random))
       yield
         result
     eitherT.value
 
-  def retryRandom[F[_] : {Async, RandomProvider}, A, B](fe: F[Either[A, B]])
-                                                       (maxAttempts: Option[Int] = Some(3),
-                                                        timeout: Option[FiniteDuration] = None,
-                                                        interval: Option[FiniteDuration] = Some(1.second),
-                                                        offset: Option[Interval[FiniteDuration]] = None,
-                                                        exponentialBackoff: Boolean = false)
-                                                       (success: Either[Error, B] => Boolean)
-                                                       (effect: (Either[Error, B], RetryState, Retry) => F[Unit])
-  : F[Either[Error, B]] =
+  def retryRandom[F[_] : {Async, RandomProvider}, A](fe: F[Either[Error, A]])
+                                                    (maxAttempts: Option[Int] = Some(3),
+                                                     timeout: Option[FiniteDuration] = None,
+                                                     interval: Option[FiniteDuration] = Some(1.second),
+                                                     offset: Option[Interval[FiniteDuration]] = None,
+                                                     exponentialBackoff: Boolean = false)
+                                                    (success: Either[Error, A] => Boolean)
+                                                    (effect: (Either[Error, A], RetryState, Retry) => F[Unit])
+  : F[Either[Error, A]] =
     random(fe)(randomOffset(maxAttempts, timeout, interval, offset, exponentialBackoff)(success)(effect))
 
-  def retry[F[_]: Async, A, B](fe: F[Either[A, B]])
-                              (maxAttempts: Option[Int] = Some(3),
-                               timeout: Option[FiniteDuration] = None,
-                               interval: Option[FiniteDuration] = Some(1.second),
-                               offset: Option[FiniteDuration] = None,
-                               exponentialBackoff: Boolean = false)
-                              (success: Either[Error, B] => Boolean)
-                              (effect: (Either[Error, B], RetryState, Retry) => F[Unit])
-  : F[Either[Error, B]] =
-    stateless[F, A, B](fe)(fixedOffset(maxAttempts, timeout, interval, offset, exponentialBackoff)(success)(effect))
+  def retry[F[_]: Async, A](fe: F[Either[Error, A]])
+                           (maxAttempts: Option[Int] = Some(3),
+                            timeout: Option[FiniteDuration] = None,
+                            interval: Option[FiniteDuration] = Some(1.second),
+                            offset: Option[FiniteDuration] = None,
+                            exponentialBackoff: Boolean = false)
+                           (success: Either[Error, A] => Boolean)
+                           (effect: (Either[Error, A], RetryState, Retry) => F[Unit])
+  : F[Either[Error, A]] =
+    stateless[F, A](fe)(fixedOffset(maxAttempts, timeout, interval, offset, exponentialBackoff)(success)(effect))
 
   def handleInterval[F[_]: Functor, S](state: RetryState, timeout: Option[FiniteDuration] = None,
                                        interval: Option[FiniteDuration] = Some(1.second),
@@ -119,7 +119,7 @@ object Retry:
         case _ => if sleepTime > 0.nano then After(sleepTime) else Now
     }
 
-  private def handleState[F[_]: Monad, A, S](maxAttempts: Option[Int] = Some(3),
+  private def handleState[F[_]: Monad, S, A](maxAttempts: Option[Int] = Some(3),
                                              timeout: Option[FiniteDuration] = None,
                                              interval: Option[FiniteDuration] = Some(1.second),
                                              exponentialBackoff: Boolean = false)
@@ -169,7 +169,9 @@ object Retry:
                                           (success: A => Boolean)
                                           (effect: (A, RetryState, Retry) => F[Unit])
   : (A, RetryState) => F[Retry] =
-    (value, state) => handleState[F, A, Unit](maxAttempts, timeout, interval, exponentialBackoff)(success)(effect)(
+    (value, state) => handleState[F, Unit, A](maxAttempts, timeout, interval, exponentialBackoff)(success)(effect)(
       StateT.pure(offset)
     ).apply(value, state).runA(())
+
+  given showRetry: Show[Retry] = Show.fromToString[Retry]
 end Retry
