@@ -9,8 +9,7 @@ import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.{Functor, Monad, Show}
 import com.peknight.error.Error
-import com.peknight.error.syntax.applicativeError.asError
-import com.peknight.error.syntax.either.asError
+import com.peknight.error.syntax.applicativeError.{asError, faeLiftET}
 import com.peknight.random.Random
 import com.peknight.random.provider.RandomProvider
 import com.peknight.random.state.between
@@ -69,7 +68,7 @@ object Retry:
   : F[Either[Error, A]] =
     val eitherT =
       for
-        random <- EitherT(RandomProvider[F].random.asError)
+        random <- RandomProvider[F].random.faeLiftET
         result <- EitherT(stateT[F, Random[F], A](fe)(f).runA(random))
       yield
         result
