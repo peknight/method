@@ -13,7 +13,7 @@ import com.peknight.error.syntax.applicativeError.{asET, asError}
 import com.peknight.random.Random
 import com.peknight.random.provider.RandomProvider
 import com.peknight.random.state.between
-import com.peknight.spire.ext.syntax.bound.{lower, upper}
+import com.peknight.spire.syntax.bound.{lower, upper}
 import spire.math.*
 import spire.math.interval.ValueBound
 import spire.syntax.std.int.**

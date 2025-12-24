@@ -15,5 +15,5 @@ lazy val methodCore = (crossProject(JVMPlatform, JSPlatform) in file("method-cor
   .settings(crossDependencies(
     peknight.error,
     peknight.random,
-    peknight.ext.spire,
+    peknight.spire,
   ))
