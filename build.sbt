@@ -3,17 +3,18 @@ import com.peknight.build.sbt.*
 
 commonSettings
 
+ThisBuild / scalacOptions --= Seq("-Werror", "-Xfatal-warnings")
+
 lazy val method = (project in file("."))
   .settings(name := "method")
-  .aggregate(
-    methodCore.jvm,
-    methodCore.js,
-  )
+  .aggregate(methodCore.projectRefs *)
 
-lazy val methodCore = (crossProject(JVMPlatform, JSPlatform) in file("method-core"))
+lazy val methodCore = (projectMatrix in file("method-core"))
   .settings(name := "method-core")
-  .settings(crossDependencies(
+  .settings(libraryDependencies ++= dependencies(
     peknight.error,
     peknight.random,
     peknight.spire,
   ))
+  .jvmPlatform(scalaVersions = Seq(scala.scala3.version))
+  .jsPlatform(scalaVersions = Seq(scala.scala3.version))
